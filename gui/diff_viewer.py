@@ -250,16 +250,20 @@ class SimpleDiffViewer:
         # Apply syntax highlighting for changes
         self.highlight_changes_in_display(original_code, modified_code)
 
-        # Center and show window
+        # FIXED: Proper window visibility
+        self.root.deiconify()  # Make sure window is not withdrawn
         self.center_window()
-        self.root.lift()
-        self.root.focus_force()
+        self.root.lift()       # Bring to front
+        self.root.focus_force() # Force focus
+        self.root.attributes('-topmost', True)  # Stay on top temporarily
+        self.root.after(100, lambda: self.root.attributes('-topmost', False))  # Remove topmost after 100ms
 
         # Reset result
         self.result = None
 
         # Show window and wait for result
         print(f"🎨 Showing GUI for {file_path}")
+        print(f"🖥️  Window should now be visible - look for 'Python Style Converter - Diff Viewer'")
 
         # Simple event loop - wait until user clicks a button
         while self.result is None:
@@ -274,7 +278,7 @@ class SimpleDiffViewer:
 
         print(f"✅ GUI result: {self.result}, apply_to_all: {apply_to_all}")
 
-        # Hide window
+        # Hide window (don't destroy, for reuse)
         self.root.withdraw()
 
         return self.result == "apply", apply_to_all

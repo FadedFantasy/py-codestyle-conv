@@ -148,8 +148,10 @@ class ASTAnalyzer:
                     if isinstance(target, ast.Name):
                         element_type = 'variable'
 
-                        # Detect constants (all uppercase)
+                        # Detect constants - either all uppercase OR module-level literal assignments
                         if target.id.isupper():
+                            element_type = 'constant'
+                        elif self._is_module_level_literal_assignment(node):
                             element_type = 'constant'
 
                         context = 'assignment'
@@ -174,7 +176,10 @@ class ASTAnalyzer:
                 if isinstance(node.target, ast.Name):
                     element_type = 'variable'
 
+                    # Detect constants - either all uppercase OR module-level literal assignments
                     if node.target.id.isupper():
+                        element_type = 'constant'
+                    elif self._is_module_level_literal_assignment(node):
                         element_type = 'constant'
 
                     context = 'annotated_assignment'
@@ -202,6 +207,41 @@ class ASTAnalyzer:
                     pass
 
                 self.generic_visit(node)
+
+            def _is_module_level_literal_assignment(self, node):
+                """Check if this is a module-level assignment to a literal value."""
+                # Check if we're at module level (not inside class or function)
+                if self.current_class or self.current_function:
+                    return False
+
+                # Check if the value is a literal
+                if hasattr(node, 'value'):  # ast.Assign
+                    return self._is_literal_value(node.value)
+                elif hasattr(node, 'value') and node.value is not None:  # ast.AnnAssign with value
+                    return self._is_literal_value(node.value)
+
+                return False
+
+            def _is_literal_value(self, node):
+                """Check if a node represents a literal value."""
+                # Handle Python 3.8+ ast.Constant
+                if isinstance(node, ast.Constant):
+                    return isinstance(node.value, (int, float, str, bool, type(None)))
+
+                # Handle older Python versions
+                if isinstance(node, ast.Num):  # Numbers
+                    return True
+                elif isinstance(node, ast.Str):  # Strings
+                    return True
+                elif isinstance(node, ast.NameConstant):  # True, False, None
+                    return True
+                elif isinstance(node, ast.Name) and node.id in ('True', 'False', 'None'):
+                    return True
+
+                # Could extend to handle simple collections like [1, 2, 3] or {'key': 'value'}
+                # but keeping it simple for now
+
+                return False
 
         visitor = ElementVisitor(self)
         visitor.visit(self.tree)

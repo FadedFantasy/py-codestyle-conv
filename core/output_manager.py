@@ -1,13 +1,12 @@
 """
-Output manager for Python Style Converter.
-Handles file output, diffs, confirmations, and different output modes.
-Now includes GUI diff viewer integration.
+Cross-File Output Manager for Python Style Converter.
+Handles coordinated transformations across multiple files with smart GUI behavior.
 """
 
 import os
 import shutil
 import difflib
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -23,304 +22,356 @@ except ImportError:
 
 
 @dataclass
-class OutputResult:
-    """Result of output operation for a single file."""
+class CrossFileResult:
+    """Result of cross-file transformation operation."""
     file_path: Path
     success: bool
     output_path: Optional[Path]
     error_message: Optional[str]
+    is_definition_file: bool
     user_skipped: bool = False
+    auto_applied: bool = False
 
 
-class OutputManager:
-    """Manages output operations for processed files."""
+@dataclass
+class DefinitionFileGroup:
+    """Group of files that are linked by definition-usage relationships."""
+    definition_file: ProcessingResult
+    usage_files: List[ProcessingResult]
+    changed_symbols: List[str]
+
+
+class CrossFileOutputManager:
+    """Manages cross-file transformations with smart GUI behavior."""
 
     def __init__(self, config_manager: ConfigManager):
-        """
-        Initialize OutputManager with configuration.
-
-        Args:
-            config_manager: ConfigManager instance with loaded configuration
-        """
+        """Initialize with configuration."""
         self.config = config_manager
         self.output_mode = config_manager.get_output_mode()
         self.confirm_changes = config_manager.should_confirm_changes()
         self.show_diffs = config_manager.should_show_diffs()
         self.new_files_suffix = config_manager.get_new_files_suffix()
 
-        # GUI state tracking
-        self.apply_to_all_remaining = False
-        self.skip_all_remaining = False
+        # State tracking
+        self.apply_to_all_definitions = False
+        self.skip_all_definitions = False
         self.quit_requested = False
 
-    def process_results(self, results: List[ProcessingResult]) -> List[OutputResult]:
+    def process_cross_file_results(self, results: List[ProcessingResult]) -> List[CrossFileResult]:
         """
-        Process all transformation results and handle output.
+        Process cross-file transformation results with smart GUI behavior.
+
+        Workflow:
+        1. Group files by definition-usage relationships
+        2. Show GUI for definition files
+        3. Auto-apply usage files when definition is confirmed
 
         Args:
             results: List of ProcessingResult objects from rule engine
 
         Returns:
-            List of OutputResult objects indicating success/failure of output operations
+            List of CrossFileResult objects
         """
+        print("🌐 Processing cross-file transformations...")
+
         output_results = []
 
-        # Filter out unsuccessful processing results
-        successful_results = [r for r in results if r.success and r.transformed_code]
+        # Handle failed results
         failed_results = [r for r in results if not r.success]
-
-        # Report failed processing
         for failed_result in failed_results:
-            output_results.append(OutputResult(
+            output_results.append(CrossFileResult(
                 file_path=failed_result.file_path,
                 success=False,
                 output_path=None,
-                error_message=f"Processing failed: {failed_result.error_message}"
+                error_message=f"Processing failed: {failed_result.error_message}",
+                is_definition_file=False
             ))
 
-        # Process successful transformations
-        for result in successful_results:
-            # Check if user requested to quit
+        # Get successful results with changes
+        successful_results = [r for r in results if r.success and self._has_actual_changes(r)]
+
+        if not successful_results:
+            print("ℹ️  No files need changes")
+            return output_results
+
+        # Group files by definition-usage relationships
+        definition_groups = self._group_definition_and_usage_files(successful_results)
+
+        print(f"📋 Found {len(definition_groups)} definition file groups")
+        for group in definition_groups:
+            print(f"   📝 {group.definition_file.file_path.name} → {len(group.usage_files)} usage files")
+
+        # Process each definition group
+        for group in definition_groups:
             if self.quit_requested:
                 break
 
-            if self._has_changes(result):
-                output_result = self._handle_single_file_output(result)
-                output_results.append(output_result)
+            # Process the definition file with GUI
+            definition_result = self._process_definition_file(group)
+            output_results.append(definition_result)
 
-                # Handle quit request
-                if output_result.error_message == "USER_QUIT":
-                    break
-            else:
-                # No changes to apply
-                output_results.append(OutputResult(
-                    file_path=result.file_path,
-                    success=True,
-                    output_path=result.file_path,
-                    error_message=None
-                ))
+            if definition_result.error_message == "USER_QUIT":
+                break
+
+            # If definition was applied, auto-apply usage files
+            if definition_result.success and not definition_result.user_skipped:
+                for usage_file in group.usage_files:
+                    usage_result = self._auto_apply_usage_file(usage_file)
+                    output_results.append(usage_result)
 
         return output_results
 
-    def _has_changes(self, result: ProcessingResult) -> bool:
-        """
-        Check if the processing result contains actual changes.
-
-        Args:
-            result: ProcessingResult to check
-
-        Returns:
-            True if there are changes, False otherwise
-        """
+    def _has_actual_changes(self, result: ProcessingResult) -> bool:
+        """Check if result has actual changes to apply."""
         return (result.transformed_code and
                 result.transformed_code != result.original_code and
                 len(result.changes_made) > 0)
 
-    def _handle_single_file_output(self, result: ProcessingResult) -> OutputResult:
+    def _group_definition_and_usage_files(self, results: List[ProcessingResult]) -> List[DefinitionFileGroup]:
         """
-        Handle output for a single file processing result.
+        Group files into definition-usage relationships.
 
-        Args:
-            result: ProcessingResult to handle
-
-        Returns:
-            OutputResult indicating success/failure
+        Logic:
+        - Definition files have changes WITHOUT "(cross-file)" marker
+        - Usage files have changes WITH "(cross-file)" marker
         """
+        definition_files = []
+        usage_files = []
+
+        # Separate definition and usage files
+        for result in results:
+            if self._is_definition_file(result):
+                definition_files.append(result)
+            else:
+                usage_files.append(result)
+
+        print(f"🔍 Categorization: {len(definition_files)} definition files, {len(usage_files)} usage files")
+
+        # Group definition files with their related usage files
+        groups = []
+        for def_file in definition_files:
+            # Extract symbols being changed in this definition file
+            changed_symbols = self._extract_changed_symbols(def_file)
+
+            # Find usage files that reference these symbols
+            related_usage_files = []
+            for usage_file in usage_files:
+                if self._usage_file_references_symbols(usage_file, changed_symbols):
+                    related_usage_files.append(usage_file)
+
+            groups.append(DefinitionFileGroup(
+                definition_file=def_file,
+                usage_files=related_usage_files,
+                changed_symbols=changed_symbols
+            ))
+
+        # Handle orphaned usage files (usage files not linked to any definition)
+        # Use file paths as identifiers instead of objects
+        linked_usage_file_paths = set()
+        for group in groups:
+            for usage_file in group.usage_files:
+                linked_usage_file_paths.add(usage_file.file_path)
+
+        orphaned_usage_files = [f for f in usage_files if f.file_path not in linked_usage_file_paths]
+        for orphan in orphaned_usage_files:
+            # Create a group with just the usage file
+            groups.append(DefinitionFileGroup(
+                definition_file=orphan,  # Treat as definition for GUI purposes
+                usage_files=[],
+                changed_symbols=self._extract_changed_symbols(orphan)
+            ))
+
+        return groups
+
+    def _is_definition_file(self, result: ProcessingResult) -> bool:
+        """
+        Check if a file contains symbol definitions (not just usages).
+
+        Logic: Definition files have changes WITHOUT "(cross-file)" marker
+        """
+        for change in result.changes_made:
+            if "(cross-file)" not in change:
+                return True
+        return False
+
+    def _extract_changed_symbols(self, result: ProcessingResult) -> List[str]:
+        """Extract the names of symbols being changed."""
+        symbols = []
+        import re
+
+        for change in result.changes_made:
+            # Look for pattern: "Renamed X 'old_name' to 'new_name'"
+            match = re.search(r"'([^']+)' to '([^']+)'", change)
+            if match:
+                old_name = match.group(1)
+                symbols.append(old_name)
+
+        return symbols
+
+    def _usage_file_references_symbols(self, usage_file: ProcessingResult, symbols: List[str]) -> bool:
+        """Check if a usage file references any of the given symbols."""
+        for change in usage_file.changes_made:
+            for symbol in symbols:
+                if symbol in change:
+                    return True
+        return False
+
+    def _process_definition_file(self, group: DefinitionFileGroup) -> CrossFileResult:
+        """
+        Process a definition file with GUI, showing usage impact.
+        """
+        result = group.definition_file
+
         try:
-            # Handle "apply to all" or "skip all" from previous GUI choices
-            if self.apply_to_all_remaining:
+            # Handle "apply to all" or "skip all" from previous choices
+            if self.apply_to_all_definitions:
                 should_apply = True
-            elif self.skip_all_remaining:
-                return OutputResult(
+                print(f"✅ Auto-applying to {result.file_path.name} (apply to all definitions)")
+            elif self.skip_all_definitions:
+                print(f"⏩ Auto-skipping {result.file_path.name} (skip all definitions)")
+                return CrossFileResult(
                     file_path=result.file_path,
                     success=True,
                     output_path=result.file_path,
                     error_message=None,
+                    is_definition_file=True,
                     user_skipped=True
                 )
             else:
-                # Show diff and get user choice
-                should_apply = self._get_user_confirmation(result)
+                # Show GUI with usage impact information
+                should_apply = self._show_definition_gui(result, group)
 
-                # Handle quit request
                 if should_apply is None:  # User quit
                     self.quit_requested = True
-                    return OutputResult(
+                    return CrossFileResult(
                         file_path=result.file_path,
                         success=False,
                         output_path=None,
                         error_message="USER_QUIT",
+                        is_definition_file=True,
                         user_skipped=True
                     )
 
-                if not should_apply:
-                    return OutputResult(
-                        file_path=result.file_path,
-                        success=True,
-                        output_path=result.file_path,
-                        error_message=None,
-                        user_skipped=True
-                    )
+            if not should_apply:
+                print(f"⏩ User skipped {result.file_path.name}")
+                return CrossFileResult(
+                    file_path=result.file_path,
+                    success=True,
+                    output_path=result.file_path,
+                    error_message=None,
+                    is_definition_file=True,
+                    user_skipped=True
+                )
 
             # Apply the changes
-            output_path = self._write_output(result)
+            print(f"✅ Applying definition changes to {result.file_path.name}")
+            output_path = self._write_file_changes(result)
 
-            return OutputResult(
+            return CrossFileResult(
                 file_path=result.file_path,
                 success=True,
                 output_path=output_path,
-                error_message=None
+                error_message=None,
+                is_definition_file=True
             )
 
         except Exception as e:
-            return OutputResult(
+            return CrossFileResult(
                 file_path=result.file_path,
                 success=False,
                 output_path=None,
-                error_message=str(e)
+                error_message=str(e),
+                is_definition_file=True
             )
 
-    def _get_user_confirmation(self, result: ProcessingResult) -> Optional[bool]:
-        """
-        Get user confirmation for applying changes.
-        Uses GUI if available and show_diffs is enabled, otherwise console.
+    def _show_definition_gui(self, result: ProcessingResult, group: DefinitionFileGroup) -> Optional[bool]:
+        """Show GUI for definition file with usage impact information."""
 
-        Args:
-            result: ProcessingResult to confirm
+        # Create enhanced changes list with usage impact
+        enhanced_changes = result.changes_made.copy()
 
-        Returns:
-            True to apply, False to skip, None if user quit
-        """
+        if group.usage_files:
+            enhanced_changes.append("")  # Separator
+            enhanced_changes.append(f"📋 This will automatically update {len(group.usage_files)} usage files:")
+
+            for usage_file in group.usage_files[:5]:  # Show max 5 files
+                enhanced_changes.append(f"   • {usage_file.file_path.name}")
+
+            if len(group.usage_files) > 5:
+                enhanced_changes.append(f"   • ... and {len(group.usage_files) - 5} more files")
+
+        print(f"🎨 Showing GUI for definition file: {result.file_path.name}")
+
         if self.show_diffs and GUI_AVAILABLE:
-            return self._show_gui_diff(result)
+            try:
+                apply_changes, apply_to_all = show_diff_gui(
+                    result.file_path,
+                    result.original_code,
+                    result.transformed_code,
+                    enhanced_changes
+                )
+
+                # Handle "apply to all" choice
+                if apply_to_all:
+                    if apply_changes:
+                        self.apply_to_all_definitions = True
+                        print("✅ Will apply to all remaining definition files")
+                    else:
+                        self.skip_all_definitions = True
+                        print("⏩ Will skip all remaining definition files")
+
+                return apply_changes
+
+            except Exception as e:
+                print(f"❌ GUI error: {e}")
+                return self._console_confirmation(result, enhanced_changes)
         else:
-            return self._show_console_diff(result)
+            return self._console_confirmation(result, enhanced_changes)
 
-    def _show_gui_diff(self, result: ProcessingResult) -> Optional[bool]:
-        """
-        Show GUI diff viewer and get user choice.
-
-        Args:
-            result: ProcessingResult containing original and transformed code
-
-        Returns:
-            True to apply, False to skip, None if user quit
-        """
-        try:
-            apply_changes, apply_to_all = show_diff_gui(
-                result.file_path,
-                result.original_code,
-                result.transformed_code,
-                result.changes_made
-            )
-
-            # Handle "apply to all" choice
-            if apply_to_all:
-                if apply_changes:
-                    self.apply_to_all_remaining = True
-                    print(f"Applying changes to all remaining files...")
-                else:
-                    self.skip_all_remaining = True
-                    print(f"Skipping all remaining files...")
-
-            return apply_changes
-
-        except Exception as e:
-            print(f"GUI diff viewer error: {e}")
-            print("Falling back to console diff viewer...")
-            return self._show_console_diff(result)
-
-    def _show_console_diff(self, result: ProcessingResult) -> Optional[bool]:
-        """
-        Show console diff and get user choice (fallback method).
-
-        Args:
-            result: ProcessingResult containing original and transformed code
-
-        Returns:
-            True to apply, False to skip, None if user quit
-        """
-        if self.show_diffs:
-            self._show_diff_console(result)
-
-        if self.confirm_changes:
-            return self._ask_for_confirmation_console(result)
-
-        return True  # Apply by default if no confirmation needed
-
-    def _show_diff_console(self, result: ProcessingResult) -> None:
-        """
-        Show diff between original and transformed code in console.
-
-        Args:
-            result: ProcessingResult containing original and transformed code
-        """
-        print(f"\n{'='*60}")
-        print(f"Changes for: {result.file_path}")
-        print(f"{'='*60}")
-
-        if result.changes_made:
-            print("Changes to be made:")
-            for change in result.changes_made:
-                print(f"  - {change}")
-            print()
-
-        # Generate unified diff
-        diff_lines = list(difflib.unified_diff(
-            result.original_code.splitlines(keepends=True),
-            result.transformed_code.splitlines(keepends=True),
-            fromfile=f"{result.file_path} (original)",
-            tofile=f"{result.file_path} (transformed)",
-            lineterm=""
-        ))
-
-        if diff_lines:
-            print("Diff:")
-            for line in diff_lines:
-                print(line.rstrip())
-        else:
-            print("No visible differences in diff format.")
-
-        print(f"{'='*60}")
-
-    def _ask_for_confirmation_console(self, result: ProcessingResult) -> Optional[bool]:
-        """
-        Ask user for confirmation before applying changes (console version).
-
-        Args:
-            result: ProcessingResult to confirm
-
-        Returns:
-            True if user confirms, False to skip, None if quit
-        """
-        print(f"\nApply changes to {result.file_path}?")
-        print("Changes:")
-        for change in result.changes_made:
-            print(f"  - {change}")
+    def _console_confirmation(self, result: ProcessingResult, changes: List[str]) -> Optional[bool]:
+        """Console fallback for confirmation."""
+        print(f"\n📄 Apply changes to {result.file_path}?")
+        for change in changes:
+            print(f"  {change}")
 
         while True:
-            response = input("Apply changes? [y/n/q] (yes/no/quit): ").lower().strip()
-
+            response = input("\nApply changes? [y/n/q] (yes/no/quit): ").lower().strip()
             if response in ['y', 'yes']:
                 return True
             elif response in ['n', 'no']:
                 return False
             elif response in ['q', 'quit']:
-                print("Quitting...")
                 return None
             else:
-                print("Please enter 'y' for yes, 'n' for no, or 'q' to quit.")
+                print("Please enter 'y', 'n', or 'q'")
 
-    def _write_output(self, result: ProcessingResult) -> Path:
-        """
-        Write the transformed code to output file.
+    def _auto_apply_usage_file(self, result: ProcessingResult) -> CrossFileResult:
+        """Automatically apply changes to a usage file."""
+        try:
+            print(f"🔄 Auto-updating usage file: {result.file_path.name}")
 
-        Args:
-            result: ProcessingResult containing transformed code
+            output_path = self._write_file_changes(result)
 
-        Returns:
-            Path to the output file
-        """
+            return CrossFileResult(
+                file_path=result.file_path,
+                success=True,
+                output_path=output_path,
+                error_message=None,
+                is_definition_file=False,
+                auto_applied=True
+            )
+
+        except Exception as e:
+            return CrossFileResult(
+                file_path=result.file_path,
+                success=False,
+                output_path=None,
+                error_message=str(e),
+                is_definition_file=False
+            )
+
+    def _write_file_changes(self, result: ProcessingResult) -> Path:
+        """Write transformed code to file."""
         if self.output_mode == "in_place":
             return self._write_in_place(result)
         elif self.output_mode == "new_files":
@@ -329,46 +380,23 @@ class OutputManager:
             raise ValueError(f"Unknown output mode: {self.output_mode}")
 
     def _write_in_place(self, result: ProcessingResult) -> Path:
-        """
-        Write transformed code back to the original file.
-
-        Args:
-            result: ProcessingResult containing transformed code
-
-        Returns:
-            Path to the modified file (same as input)
-        """
-        # Create backup first
+        """Write changes back to original file."""
         backup_path = result.file_path.with_suffix(result.file_path.suffix + '.backup')
         shutil.copy2(result.file_path, backup_path)
 
         try:
             with open(result.file_path, 'w', encoding='utf-8') as f:
                 f.write(result.transformed_code)
-
-            # Remove backup if write was successful
             backup_path.unlink()
-
             return result.file_path
-
         except Exception as e:
-            # Restore from backup if write failed
             if backup_path.exists():
                 shutil.copy2(backup_path, result.file_path)
                 backup_path.unlink()
             raise e
 
     def _write_new_file(self, result: ProcessingResult) -> Path:
-        """
-        Write transformed code to a new file.
-
-        Args:
-            result: ProcessingResult containing transformed code
-
-        Returns:
-            Path to the new file
-        """
-        # Generate new filename
+        """Write changes to new file."""
         original_path = result.file_path
         stem = original_path.stem
         suffix = original_path.suffix
@@ -376,7 +404,6 @@ class OutputManager:
         new_filename = f"{stem}{self.new_files_suffix}{suffix}"
         new_path = original_path.parent / new_filename
 
-        # Ensure we don't overwrite existing files
         counter = 1
         while new_path.exists():
             new_filename = f"{stem}{self.new_files_suffix}_{counter}{suffix}"
@@ -388,72 +415,39 @@ class OutputManager:
 
         return new_path
 
-    def print_summary(self, output_results: List[OutputResult]) -> None:
-        """
-        Print a summary of all output operations.
+    def print_cross_file_summary(self, results: List[CrossFileResult]) -> None:
+        """Print summary of cross-file transformations."""
+        total_files = len(results)
+        definition_files = len([r for r in results if r.is_definition_file])
+        usage_files = len([r for r in results if not r.is_definition_file])
+        successful = len([r for r in results if r.success and not r.user_skipped])
+        auto_applied = len([r for r in results if r.auto_applied])
+        failed = len([r for r in results if not r.success and r.error_message != "USER_QUIT"])
+        skipped = len([r for r in results if r.user_skipped])
 
-        Args:
-            output_results: List of OutputResult objects to summarize
-        """
-        total_files = len(output_results)
-        successful = len([r for r in output_results if r.success and not r.user_skipped])
-        failed = len([r for r in output_results if not r.success and r.error_message != "USER_QUIT"])
-        skipped = len([r for r in output_results if r.user_skipped and r.error_message != "USER_QUIT"])
-        quit_early = len([r for r in output_results if r.error_message == "USER_QUIT"])
-
-        print(f"\n{'='*50}")
-        print("PROCESSING SUMMARY")
-        print(f"{'='*50}")
+        print(f"\n{'='*60}")
+        print("CROSS-FILE TRANSFORMATION SUMMARY")
+        print(f"{'='*60}")
         print(f"Total files processed: {total_files}")
-        print(f"Successfully processed: {successful}")
-        print(f"Failed: {failed}")
-        print(f"Skipped by user: {skipped}")
-
-        if quit_early > 0:
-            print(f"Quit early: Processing stopped by user")
-
+        print(f"  • Definition files: {definition_files}")
+        print(f"  • Usage files: {usage_files}")
+        print(f"Successfully transformed: {successful}")
+        print(f"  • Auto-applied usage files: {auto_applied}")
         if failed > 0:
-            print(f"\nFailed files:")
-            for result in output_results:
-                if not result.success and result.error_message != "USER_QUIT":
-                    print(f"  - {result.file_path}: {result.error_message}")
-
+            print(f"Failed: {failed}")
         if skipped > 0:
-            print(f"\nSkipped files:")
-            for result in output_results:
-                if result.user_skipped and result.error_message != "USER_QUIT":
-                    print(f"  - {result.file_path}")
+            print(f"Skipped by user: {skipped}")
 
         if successful > 0:
-            print(f"\nSuccessfully processed files:")
-            for result in output_results:
+            print(f"\n✅ Successfully transformed files:")
+            for result in results:
                 if result.success and not result.user_skipped:
-                    if result.output_path != result.file_path:
-                        print(f"  - {result.file_path} -> {result.output_path}")
-                    else:
-                        print(f"  - {result.file_path}")
+                    status = " (auto-applied)" if result.auto_applied else ""
+                    file_type = "📝" if result.is_definition_file else "🔗"
+                    print(f"  {file_type} {result.file_path}{status}")
 
-        print(f"{'='*50}")
+        print(f"{'='*60}")
 
-    def cleanup_backup_files(self, directory: Path, pattern: str = "*.backup") -> int:
-        """
-        Clean up backup files in the specified directory.
 
-        Args:
-            directory: Directory to clean up
-            pattern: Glob pattern for backup files
-
-        Returns:
-            Number of backup files removed
-        """
-        backup_files = list(directory.glob(pattern))
-        removed_count = 0
-
-        for backup_file in backup_files:
-            try:
-                backup_file.unlink()
-                removed_count += 1
-            except Exception:
-                pass  # Ignore errors when cleaning up
-
-        return removed_count
+# For backwards compatibility, create an alias
+OutputManager = CrossFileOutputManager

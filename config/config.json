@@ -31,7 +31,7 @@
     "variable_naming": true,
     "function_naming": true,
     "class_naming": true,
-    "constant_naming": false,
+    "constant_naming": true,
     "private_method_naming": false,
     "dunder_method_naming": false,
     "line_length": false,
