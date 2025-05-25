@@ -1,0 +1,179 @@
+{
+  "type": "object",
+  "required": ["output", "file_selection", "naming_conventions", "formatting_rules", "enabled_rules"],
+  "properties": {
+    "output": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["in_place", "new_files"],
+          "description": "Output mode: modify files in place or create new files"
+        },
+        "confirm_changes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask for confirmation before applying changes"
+        },
+        "show_diffs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show diffs before applying changes"
+        },
+        "new_files_suffix": {
+          "type": "string",
+          "default": "_formatted",
+          "description": "Suffix for new files when mode is 'new_files'"
+        }
+      }
+    },
+    "file_selection": {
+      "type": "object",
+      "properties": {
+        "include_patterns": {
+          "type": "array",
+          "items": {"type": "string"},
+          "default": ["*.py"],
+          "description": "Glob patterns for files to include"
+        },
+        "exclude_patterns": {
+          "type": "array",
+          "items": {"type": "string"},
+          "default": ["*/__pycache__/*", "*/venv/*", "*.pyc"],
+          "description": "Glob patterns for files to exclude"
+        },
+        "recursive": {
+          "type": "boolean",
+          "default": true,
+          "description": "Search directories recursively"
+        }
+      }
+    },
+    "naming_conventions": {
+      "type": "object",
+      "properties": {
+        "variables": {
+          "type": "string",
+          "enum": ["snake_case", "camelCase", "PascalCase"],
+          "description": "Naming convention for variables. snake_case: my_var, user_name | camelCase: myVar, userName | PascalCase: MyVar, UserName"
+        },
+        "functions": {
+          "type": "string",
+          "enum": ["snake_case", "camelCase", "PascalCase"],
+          "description": "Naming convention for functions. snake_case: get_user, calculate_total | camelCase: getUser, calculateTotal | PascalCase: GetUser, CalculateTotal"
+        },
+        "classes": {
+          "type": "string",
+          "enum": ["snake_case", "camelCase", "PascalCase"],
+          "description": "Naming convention for classes. snake_case: user_manager | camelCase: userManager | PascalCase: UserManager"
+        },
+        "constants": {
+          "type": "string",
+          "enum": ["UPPER_CASE", "snake_case"],
+          "description": "Naming convention for constants. UPPER_CASE: MAX_SIZE, DEFAULT_PORT | snake_case: max_size, default_port"
+        },
+        "private_methods": {
+          "type": "string",
+          "enum": ["_snake_case", "_camelCase"],
+          "description": "Naming convention for private methods (single underscore). _snake_case: _helper_method | _camelCase: _helperMethod"
+        },
+        "dunder_methods": {
+          "type": "string",
+          "enum": ["__snake_case__", "__camelCase__"],
+          "description": "Naming convention for dunder methods (double underscore). __snake_case__: __init__, __str__ | __camelCase__: __init__, __str__"
+        }
+      }
+    },
+    "formatting_rules": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Master switch: enable/disable ALL formatting rules. Set to false to only apply naming transformations."
+        },
+        "max_line_length": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 200,
+          "description": "Maximum line length"
+        },
+        "spaces_around_operators": {
+          "type": "boolean",
+          "description": "Add spaces around operators (+, -, *, etc.)"
+        },
+        "spaces_after_commas": {
+          "type": "boolean",
+          "description": "Add spaces after commas"
+        },
+        "blank_lines_after_class": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5,
+          "description": "Number of blank lines after class definitions"
+        },
+        "blank_lines_after_function": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5,
+          "description": "Number of blank lines after function definitions"
+        },
+        "import_organization": {
+          "type": "boolean",
+          "description": "Organize and sort import statements"
+        }
+      }
+    },
+    "enabled_rules": {
+      "type": "object",
+      "description": "Boolean flags to enable/disable specific transformation rules",
+      "properties": {
+        "variable_naming": {
+          "type": "boolean",
+          "description": "Transform variable names according to naming_conventions.variables setting"
+        },
+        "function_naming": {
+          "type": "boolean",
+          "description": "Transform function names according to naming_conventions.functions setting"
+        },
+        "class_naming": {
+          "type": "boolean",
+          "description": "Transform class names according to naming_conventions.classes setting"
+        },
+        "constant_naming": {
+          "type": "boolean",
+          "description": "Transform constant names according to naming_conventions.constants setting"
+        },
+        "private_method_naming": {
+          "type": "boolean",
+          "description": "Transform private method names according to naming_conventions.private_methods setting"
+        },
+        "dunder_method_naming": {
+          "type": "boolean",
+          "description": "Transform dunder method names according to naming_conventions.dunder_methods setting"
+        },
+        "line_length": {
+          "type": "boolean",
+          "description": "Apply max_line_length formatting rule to break long lines (ignored if formatting_rules.enabled is false)"
+        },
+        "operator_spacing": {
+          "type": "boolean",
+          "description": "Apply spaces_around_operators formatting rule (ignored if formatting_rules.enabled is false)"
+        },
+        "comma_spacing": {
+          "type": "boolean",
+          "description": "Apply spaces_after_commas formatting rule (ignored if formatting_rules.enabled is false)"
+        },
+        "blank_lines": {
+          "type": "boolean",
+          "description": "Apply blank_lines_after_class and blank_lines_after_function formatting rules (ignored if formatting_rules.enabled is false)"
+        },
+        "import_organization": {
+          "type": "boolean",
+          "description": "Organize and sort import statements at the top of the file (ignored if formatting_rules.enabled is false)"
+        }
+      }
+    }
+  }
+}

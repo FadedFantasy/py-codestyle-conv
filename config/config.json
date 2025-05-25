@@ -1,0 +1,43 @@
+{
+  "output": {
+    "mode": "in_place",
+    "confirm_changes": true,
+    "show_diffs": true,
+    "new_files_suffix": "_formatted"
+  },
+  "file_selection": {
+    "include_patterns": ["*.py"],
+    "exclude_patterns": ["*/__pycache__/*", "*/venv/*", "*.pyc"],
+    "recursive": true
+  },
+  "naming_conventions": {
+    "variables": "snake_case",
+    "functions": "snake_case",
+    "classes": "PascalCase",
+    "constants": "UPPER_CASE",
+    "private_methods": "_snake_case",
+    "dunder_methods": "__snake_case__"
+  },
+  "formatting_rules": {
+    "enabled": false,
+    "max_line_length": 88,
+    "spaces_around_operators": true,
+    "spaces_after_commas": true,
+    "blank_lines_after_class": 2,
+    "blank_lines_after_function": 1,
+    "import_organization": true
+  },
+  "enabled_rules": {
+    "variable_naming": true,
+    "function_naming": true,
+    "class_naming": true,
+    "constant_naming": false,
+    "private_method_naming": false,
+    "dunder_method_naming": false,
+    "line_length": false,
+    "operator_spacing": false,
+    "comma_spacing": false,
+    "blank_lines": false,
+    "import_organization": false
+  }
+}
