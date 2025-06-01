@@ -29,6 +29,7 @@
     "constant_naming": true,
     "private_method_naming": false,
     "dunder_method_naming": false,
-    "blank_lines": false
+    "blank_lines": false,
+    "docstring_formatting": true
   }
 }

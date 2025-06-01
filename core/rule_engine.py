@@ -16,6 +16,7 @@ from .code_transformer import TransformationResult
 from .global_symbol_tracker import GlobalSymbolMap
 from .naming_converter import NamingConverter
 from .blank_lines_formatter import BlankLinesFormatter
+from .docstring_formatter import DocstringFormatter
 from .global_transformation_generator import GlobalTransformationGenerator, GlobalTransformation
 
 
@@ -58,6 +59,7 @@ class RuleEngine:
         self.analyzer = ASTAnalyzer()
         self.naming_converter = NamingConverter(config_manager)
         self.formatter = BlankLinesFormatter(config_manager)
+        self.docstring_formatter = DocstringFormatter(config_manager)
 
         # Initialize cross-file components if available
         if global_symbol_map:
@@ -198,20 +200,33 @@ class RuleEngine:
                 symbol_type = self.global_transformation_generator.get_symbol_type_for_file(old_name, file_path)
                 all_changes.append(f"Renamed {symbol_type} '{old_name}' to '{new_name}' (cross-file)")
 
-            if not combined_transformations:
-                # Check if we need formatting
-                if self.formatter.is_formatting_enabled():
-                    formatting_result = self.formatter.apply_blank_lines_formatting(original_code)
-                    if formatting_result:
-                        return ProcessingResult(
-                            file_path=file_path,
-                            success=True,
-                            original_code=original_code,
-                            transformed_code=formatting_result,
-                            changes_made=["Applied blank lines formatting"],
-                            error_message=None
-                        )
+            # Step 4: Apply combined transformations if any
+            transformed_code = original_code
+            if combined_transformations:
+                try:
+                    # Always use formatting-preserving transformation for naming changes
+                    transformed_code = self.analyzer.apply_transformations_preserve_formatting(combined_transformations)
+                    print(f"🎯 Applied {len(combined_transformations)} transformations to {file_path} (formatting preserved)")
 
+                except Exception as e:
+                    raise ValueError(f"Error applying combined transformations: {e}")
+
+            # Step 5: Apply docstring formatting if enabled
+            if self.docstring_formatter.is_formatting_enabled():
+                docstring_result, docstring_changes = self.docstring_formatter.apply_docstring_formatting(transformed_code)
+                if docstring_result:
+                    transformed_code = docstring_result
+                    all_changes.extend(docstring_changes)
+
+            # Step 6: Apply blank lines formatting if enabled
+            if self.formatter.is_formatting_enabled():
+                formatting_result = self.formatter.apply_blank_lines_formatting(transformed_code)
+                if formatting_result:
+                    transformed_code = formatting_result
+                    all_changes.append("Applied blank lines formatting")
+
+            # Check if any changes were made
+            if not all_changes and transformed_code == original_code:
                 # No transformations needed for this file
                 return ProcessingResult(
                     file_path=file_path,
@@ -221,22 +236,6 @@ class RuleEngine:
                     changes_made=[],
                     error_message=None
                 )
-
-            # Step 4: Apply combined transformations
-            try:
-                # Always use formatting-preserving transformation for naming changes
-                transformed_code = self.analyzer.apply_transformations_preserve_formatting(combined_transformations)
-                print(f"🎯 Applied {len(combined_transformations)} transformations to {file_path} (formatting preserved)")
-
-            except Exception as e:
-                raise ValueError(f"Error applying combined transformations: {e}")
-
-            # Step 5: Apply formatting transformations if enabled
-            if self.formatter.is_formatting_enabled():
-                formatting_result = self.formatter.apply_blank_lines_formatting(transformed_code)
-                if formatting_result:
-                    transformed_code = formatting_result
-                    all_changes.append("Applied blank lines formatting")
 
             return ProcessingResult(
                 file_path=file_path,
@@ -311,7 +310,14 @@ class RuleEngine:
                     transformed_code = naming_result.transformed_code
                     all_changes.extend(naming_result.changes_made)
 
-            # Apply formatting transformations
+            # Apply docstring formatting transformations
+            if self.docstring_formatter.is_formatting_enabled():
+                docstring_result, docstring_changes = self.docstring_formatter.apply_docstring_formatting(transformed_code)
+                if docstring_result:
+                    transformed_code = docstring_result
+                    all_changes.extend(docstring_changes)
+
+            # Apply blank lines formatting transformations
             if self.formatter.is_formatting_enabled():
                 formatting_result = self.formatter.apply_blank_lines_formatting(transformed_code)
                 if formatting_result:

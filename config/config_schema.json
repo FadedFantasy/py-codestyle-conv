@@ -133,6 +133,10 @@
         "blank_lines": {
           "type": "boolean",
           "description": "Apply blank_lines_after_class and blank_lines_after_function formatting rules"
+        },
+        "docstring_formatting": {
+          "type": "boolean",
+          "description": "Format docstrings according to Google style: trim whitespace, ensure periods, capitalize first letter"
         }
       }
     }
