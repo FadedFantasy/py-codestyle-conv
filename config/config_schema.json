@@ -88,25 +88,6 @@
     "formatting_rules": {
       "type": "object",
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Master switch: enable/disable ALL formatting rules. Set to false to only apply naming transformations."
-        },
-        "max_line_length": {
-          "type": "integer",
-          "minimum": 60,
-          "maximum": 200,
-          "description": "Maximum line length"
-        },
-        "spaces_around_operators": {
-          "type": "boolean",
-          "description": "Add spaces around operators (+, -, *, etc.)"
-        },
-        "spaces_after_commas": {
-          "type": "boolean",
-          "description": "Add spaces after commas"
-        },
         "blank_lines_after_class": {
           "type": "integer",
           "minimum": 0,
@@ -118,10 +99,6 @@
           "minimum": 0,
           "maximum": 5,
           "description": "Number of blank lines after function definitions"
-        },
-        "import_organization": {
-          "type": "boolean",
-          "description": "Organize and sort import statements"
         }
       }
     },
@@ -153,25 +130,9 @@
           "type": "boolean",
           "description": "Transform dunder method names according to naming_conventions.dunder_methods setting"
         },
-        "line_length": {
-          "type": "boolean",
-          "description": "Apply max_line_length formatting rule to break long lines (ignored if formatting_rules.enabled is false)"
-        },
-        "operator_spacing": {
-          "type": "boolean",
-          "description": "Apply spaces_around_operators formatting rule (ignored if formatting_rules.enabled is false)"
-        },
-        "comma_spacing": {
-          "type": "boolean",
-          "description": "Apply spaces_after_commas formatting rule (ignored if formatting_rules.enabled is false)"
-        },
         "blank_lines": {
           "type": "boolean",
-          "description": "Apply blank_lines_after_class and blank_lines_after_function formatting rules (ignored if formatting_rules.enabled is false)"
-        },
-        "import_organization": {
-          "type": "boolean",
-          "description": "Organize and sort import statements at the top of the file (ignored if formatting_rules.enabled is false)"
+          "description": "Apply blank_lines_after_class and blank_lines_after_function formatting rules"
         }
       }
     }

@@ -19,13 +19,8 @@
     "dunder_methods": "__snake_case__"
   },
   "formatting_rules": {
-    "enabled": false,
-    "max_line_length": 88,
-    "spaces_around_operators": true,
-    "spaces_after_commas": true,
     "blank_lines_after_class": 2,
-    "blank_lines_after_function": 1,
-    "import_organization": true
+    "blank_lines_after_function": 1
   },
   "enabled_rules": {
     "variable_naming": true,
@@ -34,10 +29,6 @@
     "constant_naming": true,
     "private_method_naming": false,
     "dunder_method_naming": false,
-    "line_length": false,
-    "operator_spacing": false,
-    "comma_spacing": false,
-    "blank_lines": false,
-    "import_organization": false
+    "blank_lines": false
   }
 }

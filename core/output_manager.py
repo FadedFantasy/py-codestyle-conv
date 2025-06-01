@@ -1,17 +1,17 @@
 """
 Cross-File Output Manager for Python Style Converter.
-Handles coordinated transformations across multiple files with smart GUI behavior.
+Orchestrates cross-file transformations with smart GUI behavior.
+Simplified and focused on coordination rather than implementation details.
 """
 
-import os
-import shutil
-import difflib
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional
 from pathlib import Path
 from dataclasses import dataclass
 
 from config.config_manager import ConfigManager
 from .rule_engine import ProcessingResult
+from .cross_file_processor import CrossFileProcessor, DefinitionFileGroup
+from .file_writer import FileWriter
 
 # Import GUI diff viewer
 try:
@@ -33,24 +33,18 @@ class CrossFileResult:
     auto_applied: bool = False
 
 
-@dataclass
-class DefinitionFileGroup:
-    """Group of files that are linked by definition-usage relationships."""
-    definition_file: ProcessingResult
-    usage_files: List[ProcessingResult]
-    changed_symbols: List[str]
-
-
 class CrossFileOutputManager:
     """Manages cross-file transformations with smart GUI behavior."""
 
     def __init__(self, config_manager: ConfigManager):
         """Initialize with configuration."""
         self.config = config_manager
-        self.output_mode = config_manager.get_output_mode()
         self.confirm_changes = config_manager.should_confirm_changes()
         self.show_diffs = config_manager.should_show_diffs()
-        self.new_files_suffix = config_manager.get_new_files_suffix()
+
+        # Initialize components
+        self.processor = CrossFileProcessor()
+        self.file_writer = FileWriter(config_manager)
 
         # State tracking
         self.apply_to_all_definitions = False
@@ -88,14 +82,14 @@ class CrossFileOutputManager:
             ))
 
         # Get successful results with changes
-        successful_results = [r for r in results if r.success and self._has_actual_changes(r)]
+        successful_results = [r for r in results if r.success and self.processor.has_actual_changes(r)]
 
         if not successful_results:
             print("ℹ️  No files need changes")
             return output_results
 
         # Group files by definition-usage relationships
-        definition_groups = self._group_definition_and_usage_files(successful_results)
+        definition_groups = self.processor.group_definition_and_usage_files(successful_results)
 
         print(f"📋 Found {len(definition_groups)} definition file groups")
         for group in definition_groups:
@@ -121,105 +115,8 @@ class CrossFileOutputManager:
 
         return output_results
 
-    def _has_actual_changes(self, result: ProcessingResult) -> bool:
-        """Check if result has actual changes to apply."""
-        return (result.transformed_code and
-                result.transformed_code != result.original_code and
-                len(result.changes_made) > 0)
-
-    def _group_definition_and_usage_files(self, results: List[ProcessingResult]) -> List[DefinitionFileGroup]:
-        """
-        Group files into definition-usage relationships.
-
-        Logic:
-        - Definition files have changes WITHOUT "(cross-file)" marker
-        - Usage files have changes WITH "(cross-file)" marker
-        """
-        definition_files = []
-        usage_files = []
-
-        # Separate definition and usage files
-        for result in results:
-            if self._is_definition_file(result):
-                definition_files.append(result)
-            else:
-                usage_files.append(result)
-
-        print(f"🔍 Categorization: {len(definition_files)} definition files, {len(usage_files)} usage files")
-
-        # Group definition files with their related usage files
-        groups = []
-        for def_file in definition_files:
-            # Extract symbols being changed in this definition file
-            changed_symbols = self._extract_changed_symbols(def_file)
-
-            # Find usage files that reference these symbols
-            related_usage_files = []
-            for usage_file in usage_files:
-                if self._usage_file_references_symbols(usage_file, changed_symbols):
-                    related_usage_files.append(usage_file)
-
-            groups.append(DefinitionFileGroup(
-                definition_file=def_file,
-                usage_files=related_usage_files,
-                changed_symbols=changed_symbols
-            ))
-
-        # Handle orphaned usage files (usage files not linked to any definition)
-        # Use file paths as identifiers instead of objects
-        linked_usage_file_paths = set()
-        for group in groups:
-            for usage_file in group.usage_files:
-                linked_usage_file_paths.add(usage_file.file_path)
-
-        orphaned_usage_files = [f for f in usage_files if f.file_path not in linked_usage_file_paths]
-        for orphan in orphaned_usage_files:
-            # Create a group with just the usage file
-            groups.append(DefinitionFileGroup(
-                definition_file=orphan,  # Treat as definition for GUI purposes
-                usage_files=[],
-                changed_symbols=self._extract_changed_symbols(orphan)
-            ))
-
-        return groups
-
-    def _is_definition_file(self, result: ProcessingResult) -> bool:
-        """
-        Check if a file contains symbol definitions (not just usages).
-
-        Logic: Definition files have changes WITHOUT "(cross-file)" marker
-        """
-        for change in result.changes_made:
-            if "(cross-file)" not in change:
-                return True
-        return False
-
-    def _extract_changed_symbols(self, result: ProcessingResult) -> List[str]:
-        """Extract the names of symbols being changed."""
-        symbols = []
-        import re
-
-        for change in result.changes_made:
-            # Look for pattern: "Renamed X 'old_name' to 'new_name'"
-            match = re.search(r"'([^']+)' to '([^']+)'", change)
-            if match:
-                old_name = match.group(1)
-                symbols.append(old_name)
-
-        return symbols
-
-    def _usage_file_references_symbols(self, usage_file: ProcessingResult, symbols: List[str]) -> bool:
-        """Check if a usage file references any of the given symbols."""
-        for change in usage_file.changes_made:
-            for symbol in symbols:
-                if symbol in change:
-                    return True
-        return False
-
     def _process_definition_file(self, group: DefinitionFileGroup) -> CrossFileResult:
-        """
-        Process a definition file with GUI, showing usage impact.
-        """
+        """Process a definition file with GUI, showing usage impact."""
         result = group.definition_file
 
         try:
@@ -265,13 +162,13 @@ class CrossFileOutputManager:
 
             # Apply the changes
             print(f"✅ Applying definition changes to {result.file_path.name}")
-            output_path = self._write_file_changes(result)
+            write_result = self.file_writer.write_transformed_code(result.file_path, result.transformed_code)
 
             return CrossFileResult(
                 file_path=result.file_path,
-                success=True,
-                output_path=output_path,
-                error_message=None,
+                success=write_result.success,
+                output_path=write_result.output_path,
+                error_message=write_result.error_message,
                 is_definition_file=True
             )
 
@@ -286,19 +183,8 @@ class CrossFileOutputManager:
 
     def _show_definition_gui(self, result: ProcessingResult, group: DefinitionFileGroup) -> Optional[bool]:
         """Show GUI for definition file with usage impact information."""
-
         # Create enhanced changes list with usage impact
-        enhanced_changes = result.changes_made.copy()
-
-        if group.usage_files:
-            enhanced_changes.append("")  # Separator
-            enhanced_changes.append(f"📋 This will automatically update {len(group.usage_files)} usage files:")
-
-            for usage_file in group.usage_files[:5]:  # Show max 5 files
-                enhanced_changes.append(f"   • {usage_file.file_path.name}")
-
-            if len(group.usage_files) > 5:
-                enhanced_changes.append(f"   • ... and {len(group.usage_files) - 5} more files")
+        enhanced_changes = self.processor.create_enhanced_changes_list(result, group)
 
         print(f"🎨 Showing GUI for definition file: {result.file_path.name}")
 
@@ -350,13 +236,13 @@ class CrossFileOutputManager:
         try:
             print(f"🔄 Auto-updating usage file: {result.file_path.name}")
 
-            output_path = self._write_file_changes(result)
+            write_result = self.file_writer.write_transformed_code(result.file_path, result.transformed_code)
 
             return CrossFileResult(
                 file_path=result.file_path,
-                success=True,
-                output_path=output_path,
-                error_message=None,
+                success=write_result.success,
+                output_path=write_result.output_path,
+                error_message=write_result.error_message,
                 is_definition_file=False,
                 auto_applied=True
             )
@@ -369,51 +255,6 @@ class CrossFileOutputManager:
                 error_message=str(e),
                 is_definition_file=False
             )
-
-    def _write_file_changes(self, result: ProcessingResult) -> Path:
-        """Write transformed code to file."""
-        if self.output_mode == "in_place":
-            return self._write_in_place(result)
-        elif self.output_mode == "new_files":
-            return self._write_new_file(result)
-        else:
-            raise ValueError(f"Unknown output mode: {self.output_mode}")
-
-    def _write_in_place(self, result: ProcessingResult) -> Path:
-        """Write changes back to original file."""
-        backup_path = result.file_path.with_suffix(result.file_path.suffix + '.backup')
-        shutil.copy2(result.file_path, backup_path)
-
-        try:
-            with open(result.file_path, 'w', encoding='utf-8') as f:
-                f.write(result.transformed_code)
-            backup_path.unlink()
-            return result.file_path
-        except Exception as e:
-            if backup_path.exists():
-                shutil.copy2(backup_path, result.file_path)
-                backup_path.unlink()
-            raise e
-
-    def _write_new_file(self, result: ProcessingResult) -> Path:
-        """Write changes to new file."""
-        original_path = result.file_path
-        stem = original_path.stem
-        suffix = original_path.suffix
-
-        new_filename = f"{stem}{self.new_files_suffix}{suffix}"
-        new_path = original_path.parent / new_filename
-
-        counter = 1
-        while new_path.exists():
-            new_filename = f"{stem}{self.new_files_suffix}_{counter}{suffix}"
-            new_path = original_path.parent / new_filename
-            counter += 1
-
-        with open(new_path, 'w', encoding='utf-8') as f:
-            f.write(result.transformed_code)
-
-        return new_path
 
     def print_cross_file_summary(self, results: List[CrossFileResult]) -> None:
         """Print summary of cross-file transformations."""

@@ -4,10 +4,9 @@ Handles loading, validation, and management of configuration settings.
 """
 
 import json
-import os
-from typing import Dict, Any, Optional
 from pathlib import Path
-import jsonschema
+from typing import Dict, Any, Optional
+
 from jsonschema import validate, ValidationError
 
 
@@ -155,6 +154,14 @@ class ConfigManager:
             The rule value or None if not found
         """
         return self.get(f'formatting_rules.{rule_name}')
+
+    def get_blank_lines_after_class(self) -> int:
+        """Get the number of blank lines after class definitions."""
+        return self.get('formatting_rules.blank_lines_after_class', 2)
+
+    def get_blank_lines_after_function(self) -> int:
+        """Get the number of blank lines after function definitions."""
+        return self.get('formatting_rules.blank_lines_after_function', 1)
 
     def reload(self) -> None:
         """Reload the configuration from file."""
